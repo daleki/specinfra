@@ -1,28 +1,23 @@
-require 'specinfra/version'
-require 'specinfra/helper'
-require 'specinfra/backend'
-require 'specinfra/command'
-require 'specinfra/command_factory'
-require 'specinfra/command_result'
-require 'specinfra/configuration'
-require 'specinfra/runner'
-require 'specinfra/processor'
+require 'specinfra/core'
 
 include Specinfra
+include Specinfra::Helper::Os
+include Specinfra::Helper::Properties
+include Specinfra::Helper::HostInventory
 
 module Specinfra
   class << self
-    def configuration
-      Specinfra::Configuration
-    end
-
     def command
-      Specinfra::CommandFactory
+      Specinfra::CommandFactory.instance
     end
 
     def backend
       type = Specinfra.configuration.backend
       if type.nil?
+        if Specinfra.configuration.error_on_missing_backend_type
+          raise "No backend type is specified."
+        end
+
         warn "No backend type is specified. Fall back to :exec type."
         type = :exec
       end
@@ -46,30 +41,5 @@ if defined?(RSpec)
       example = RSpec.respond_to?(:current_example) ? RSpec.current_example : self.example
       Specinfra.backend.set_example(example)
     end
-  end
-end
-
-class Class
-  def subclasses
-    result = []
-    ObjectSpace.each_object(Class) do |k|
-      result << k if k < self
-    end
-    result
-  end
-end
-
-class String
-  def to_snake_case
-    self.gsub(/::/, '/').
-    gsub(/([A-Z]+)([A-Z][a-z])/,'\1_\2').
-    gsub(/([a-z\d])([A-Z])/,'\1_\2').
-    tr("-", "_").
-    downcase
-  end
-
-  def to_camel_case
-    return self if self !~ /_/ && self =~ /[A-Z]+.*/
-    split('_').map{|e| e.capitalize}.join
   end
 end

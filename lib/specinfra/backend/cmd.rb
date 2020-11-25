@@ -5,10 +5,20 @@ module Specinfra
     class Cmd < Base
       include PowerShell::ScriptHelper
 
+      def os_info
+        { :family => 'windows', :release => nil, :arch => nil, :cygwin => `echo $0`.include?("sh") }
+      end
+
       def run_command(cmd, opts={})
-        set :os, :family => 'windows'
         script = create_script(cmd)
-        result = execute_script %Q{#{powershell} -encodedCommand #{encode_script(script)}}
+        psh = powershell
+        if os_info[:cygwin]
+          # convert c:\windows... to /cygdrive/c/windows...
+          psh.gsub!("\\", "/")
+          psh.sub!(":", "")
+          psh = psh.prepend("/cygdrive/")
+        end
+        result = execute_script %Q{#{psh} -NoProfile -encodedCommand #{encode_script(script)}}
 
         if @example
           @example.metadata[:command] = script
@@ -39,7 +49,10 @@ module Specinfra
       private
 
       def powershell
-        architecture = @example.metadata[:architecture] || Specinfra.configuration.architecture
+        architecture = if @example
+          @example.metadata[:architecture]
+        end
+        architecture ||= get_config(:architecture)
 
         case architecture
         when :i386 then x86_powershell

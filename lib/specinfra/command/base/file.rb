@@ -16,6 +16,14 @@ class Specinfra::Command::Base::File < Specinfra::Command::Base
       "test -S #{escape(file)}"
     end
 
+    def check_is_block_device(file)
+      "test -b #{escape(file)}"
+    end
+
+    def check_is_character_device(file)
+      "test -c #{escape(file)}"
+    end
+
     def check_is_symlink(file)
       "test -L #{escape(file)}"
     end
@@ -53,7 +61,7 @@ class Specinfra::Command::Base::File < Specinfra::Command::Base
       sed = "sed -n #{escape(from)},#{escape(to)}p #{escape(file)}"
       sed += " | sed -n 1,#{escape(to)}p" if from != '1' and to != '$'
       checker_with_regexp = check_contains_with_regexp("-", expected_pattern)
-      checker_with_fixed  = check_contains_with_fixed_strings("-", expected_pattern)
+      checker_with_fixed = check_contains_with_fixed_strings("-", expected_pattern)
       "#{sed} | #{checker_with_regexp} || #{sed} | #{checker_with_fixed}"
     end
 
@@ -76,6 +84,10 @@ class Specinfra::Command::Base::File < Specinfra::Command::Base
       "grep -qFs -- #{escape(expected_pattern)} #{escape(file)}"
     end
 
+    def check_exists(file)
+      "test -e #{escape(file)}"
+    end
+
     def get_md5sum(file)
       "md5sum #{escape(file)} | cut -d ' ' -f 1"
     end
@@ -85,7 +97,7 @@ class Specinfra::Command::Base::File < Specinfra::Command::Base
     end
 
     def get_content(file)
-      "cat #{file} 2> /dev/null || echo -n"
+      "cat #{escape(file)} 2> /dev/null || echo -n"
     end
 
     def check_is_mounted(path)
@@ -106,7 +118,7 @@ class Specinfra::Command::Base::File < Specinfra::Command::Base
     end
 
     def check_is_linked_to(link, target)
-      "stat -c %N #{escape(link)} | egrep -e \"-> .#{escape(target)}.\""
+      %Q|test x"$(readlink #{escape(link)})" = x"#{escape(target)}"|
     end
 
     def check_is_link(link)
@@ -114,7 +126,15 @@ class Specinfra::Command::Base::File < Specinfra::Command::Base
     end
 
     def get_link_target(link)
-      "readlink -f #{escape(link)}"
+      "readlink #{escape(link)}"
+    end
+
+    def get_link_realpath(link)
+      "readlink -e #{escape(link)}"
+    end
+
+    def check_is_dereferenceable(link)
+      %Q|test -n "$(readlink -e #{escape(link)})"|
     end
 
     def get_mtime(file)
@@ -125,37 +145,49 @@ class Specinfra::Command::Base::File < Specinfra::Command::Base
       "stat -c %s #{escape(file)}"
     end
 
-    def change_mode(file, mode)
-      "chmod #{mode} #{escape(file)}"
+    def change_mode(file, mode, options = {})
+      option = '-R' if options[:recursive]
+      "chmod #{option} #{mode} #{escape(file)}".squeeze(' ')
     end
 
-    def change_owner(file, owner, group=nil)
+    def change_owner(file, owner, group=nil, options = {})
+      option = '-R' if options[:recursive]
       owner = "#{owner}:#{group}" if group
-      "chown #{owner} #{escape(file)}"
+      "chown #{option} #{escape(owner)} #{escape(file)}".squeeze(' ')
     end
 
-    def change_group(file, group)
-      "chgrp #{group} #{escape(file)}"
+    def change_group(file, group, options = {})
+      option = '-R' if options[:recursive]
+      "chgrp #{option} #{escape(group)} #{escape(file)}".squeeze(' ')
     end
 
     def create_as_directory(file)
       "mkdir -p #{escape(file)}"
     end
 
-    def copy(src, dest)
-      "cp #{escape(src)} #{escape(dest)}"
+    def copy(src, dest, options = {})
+      option = '-p'
+      option << 'R' if options[:recursive]
+      "cp #{option} #{escape(src)} #{escape(dest)}"
     end
 
     def move(src, dest)
       "mv #{escape(src)} #{escape(dest)}"
     end
 
-    def link_to(link, target)
-      "ln -s #{escape(target)} #{escape(link)}"
+    def link_to(link, target, options = {})
+      option = '-s'
+      option << 'f' if options[:force]
+      option << 'n' if options[:no_dereference]
+      "ln #{option} #{escape(target)} #{escape(link)}"
     end
 
     def remove(file)
       "rm -rf #{escape(file)}"
+    end
+
+    def download(src, dest)
+      "curl -sSL #{escape(src)} -o #{escape(dest)}"
     end
   end
 end

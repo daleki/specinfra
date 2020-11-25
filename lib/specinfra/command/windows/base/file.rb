@@ -1,5 +1,12 @@
 class Specinfra::Command::Windows::Base::File < Specinfra::Command::Windows::Base
   class << self
+    def check_exists(file)
+      cmd = %Q!Test-Path -Path "#{file}"!
+      Backend::PowerShell::Command.new do
+        exec cmd
+      end
+    end
+
     def check_is_file(file)
       cmd = item_has_attribute file, 'Archive'
       Backend::PowerShell::Command.new do
@@ -36,7 +43,15 @@ class Specinfra::Command::Windows::Base::File < Specinfra::Command::Windows::Bas
     end
 
     def get_content(file)
-      %Q![Io.File]::ReadAllText("#{file}")!
+      %Q!Get-Content("#{file}") | Write-Host!
+    end
+
+    def get_md5sum(file)
+      <<-EOT
+      $md5 = New-Object -TypeName System.Security.Cryptography.MD5CryptoServiceProvider
+      $sum = [System.BitConverter]::ToString($md5.ComputeHash([System.IO.File]::ReadAllBytes("#{file}")))
+      echo $sum.ToLower().Replace("-","")
+      EOT
     end
 
     def check_is_accessible_by_user(file, user, access)
@@ -73,7 +88,7 @@ class Specinfra::Command::Windows::Base::File < Specinfra::Command::Windows::Bas
 
     def check_contains(file, pattern)
       Backend::PowerShell::Command.new do
-        exec %Q![Io.File]::ReadAllText("#{file}") -match '#{convert_regexp(pattern)}'!
+        exec %Q!(Get-Content("#{file}") | Out-String) -match '#{convert_regexp(pattern)}'!
       end
     end
 
@@ -82,13 +97,19 @@ class Specinfra::Command::Windows::Base::File < Specinfra::Command::Windows::Bas
       to ||= '$'
       Backend::PowerShell::Command.new do
         using 'crop_text.ps1'
-        exec %Q!(CropText -text ([Io.File]::ReadAllText("#{file}")) -fromPattern '#{convert_regexp(from)}' -toPattern '#{convert_regexp(to)}') -match '#{pattern}'!
+        exec %Q!(CropText -text (Get-Content("#{file}") | Out-String) -fromPattern '#{convert_regexp(from)}' -toPattern '#{convert_regexp(to)}') -match '#{pattern}'!
       end
     end
 
     def check_has_version(name,version)
       cmd = "((Get-Command '#{name}').FileVersionInfo.ProductVersion -eq '#{version}') -or ((Get-Command '#{name}').FileVersionInfo.FileVersion -eq '#{version}')"
       Backend::PowerShell::Command.new { exec cmd }
+    end
+
+    def check_is_owned_by(file, owner)
+      Backend::PowerShell::Command.new do
+        exec "$(if((Get-Item '#{file}').GetAccessControl().Owner -match '#{owner}' -or ((Get-Item '#{file}').GetAccessControl().Owner -match '#{owner}').Length -gt 0){ $TRUE } else { $FALSE })"
+      end
     end
 
     private

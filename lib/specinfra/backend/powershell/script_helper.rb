@@ -5,10 +5,10 @@ module Specinfra
     module PowerShell
       module ScriptHelper
         def build_command(cmd)
-          path = Specinfra.configuration.path
+          path = get_config(:path)
           if path
             cmd.strip!
-            cmd = 
+            cmd =
 <<-EOF
 $env:path = "#{path};$env:path"
 #{cmd}
@@ -18,15 +18,13 @@ EOF
         end
 
         def add_pre_command(cmd)
-          path = Specinfra.configuration.path
-          if Specinfra.configuration.pre_command
+          path = get_config(:path)
+          if get_config(:pre_command)
             cmd.strip!
-            cmd = 
+            cmd =
 <<-EOF
-if (#{Specinfra.configuration.pre_command})
-{
+#{get_config(:pre_command)}
 #{cmd}
-}
 EOF
             cmd = "$env:path = \"#{path};$env:path\"\n#{cmd}" if path
           end
@@ -56,7 +54,7 @@ $exitCode = 1
 $ProgressPreference = "SilentlyContinue"
 try {
   #{ps_functions.join("\n")}
-  $success = (#{script})
+  $success = $(#{script})
   if ($success -is [Boolean] -and $success) { $exitCode = 0 }
 } catch {
   Write-Output $_.Exception.Message

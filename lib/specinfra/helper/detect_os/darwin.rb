@@ -1,7 +1,11 @@
 class Specinfra::Helper::DetectOs::Darwin < Specinfra::Helper::DetectOs
-  def self.detect
-    if run_command('uname -s').stdout =~ /Darwin/i
-      { :family => 'darwin', :release => nil }
+  def detect
+    if ( uname = run_command('uname -sr').stdout ) && uname =~ /Darwin/i
+      if uname =~ /([\d.]+)$/
+         { :family => 'darwin', :release => $1 }
+      else 
+         { :family => 'darwin', :release => nil }
+      end
     end
   end
 end

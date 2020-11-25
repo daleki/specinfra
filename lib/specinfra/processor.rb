@@ -1,5 +1,3 @@
-require 'specinfra/ec2_metadata'
-
 module Specinfra
   class Processor
     def self.check_service_is_running(service)
@@ -8,8 +6,8 @@ module Specinfra
 
       # In Ubuntu, some services are under upstart and "service foo status" returns
       # exit status 0 even though they are stopped.
-      # So return false if stdout contains "stopped/waiting".
-      return false if ret.stdout =~ /stopped\/waiting/
+      # So return false if stdout contains "stopped/waiting" or "stop/waiting".
+      return false if ret.stdout =~ /stop(ped)?\/waiting/
 
       # If the service is not registered, check by ps command
       if ret.exit_status == 1
@@ -91,14 +89,23 @@ module Specinfra
       end
 
       mount = ret.stdout.scan(/\S+/)
-      actual_attr    = { :device => mount[0], :type => mount[4] }
-      mount[5].gsub(/\(|\)/, '').split(',').each do |option|
-        name, val = option.split('=')
-        if val.nil?
-          actual_attr[name.to_sym] = true
-        else
-          val = val.to_i if val.match(/^\d+$/)
-          actual_attr[name.to_sym] = val
+      actual_attr = { }
+      actual_attr[:device] = mount[0]
+      # Output of mount depends on os:
+      # a)  proc on /proc type proc (rw,noexec,nosuid,nodev)
+      # b)  procfs on /proc (procfs, local)
+      actual_attr[:type] = mount[4] if mount[3] == 'type' # case a.
+      if match = ret.stdout.match(/\((.*)\)/)
+        options = match[1].split(',')
+        actual_attr[:type] ||= options.shift              # case b.
+        options.each do |option|
+          name, val = option.split('=')
+          if val.nil?
+            actual_attr[name.strip.to_sym] = true
+          else
+            val = val.to_i if val.match(/^\d+$/)
+            actual_attr[name.strip.to_sym] = val
+          end
         end
       end
 
@@ -117,6 +124,41 @@ module Specinfra
       end
     end
 
+    def self.check_fstab_has_entry(expected_attr)
+      return false unless expected_attr[:mount_point]
+      cmd = Specinfra.command.get(:get_fstab_entry, expected_attr[:mount_point])
+      ret = Specinfra.backend.run_command(cmd)
+      return false if ret.failure?
+
+      fstab = ret.stdout.scan(/\S+/)
+      actual_attr = {
+        :device      => fstab[0],
+        :mount_point => fstab[1],
+        :type        => fstab[2],
+        :dump        => fstab[4].to_i,
+        :pass        => fstab[5].to_i
+      }
+      fstab[3].split(',').each do |option|
+        name, val = option.split('=')
+        if val.nil?
+          actual_attr[name.to_sym] = true
+        else
+          val = val.to_i if val.match(/^\d+$/)
+          actual_attr[name.to_sym] = val
+        end
+      end
+
+      unless expected_attr[:options].nil?
+        expected_attr.merge!(expected_attr[:options])
+        expected_attr.delete(:options)
+      end
+
+      expected_attr.each do |key, val|
+        return false if actual_attr[key] != val
+      end
+      true
+    end
+
     def self.check_routing_table_has_entry(expected_attr)
       return false if ! expected_attr[:destination]
       cmd = Specinfra.command.get(:get_routing_table_entry, expected_attr[:destination])
@@ -127,18 +169,40 @@ module Specinfra
 
       if os[:family] == 'openbsd'
         match = ret.stdout.match(/^(\S+)\s+(\S+).*?(\S+[0-9]+)(\s*)$/)
-	actual_attr = {
-	  :destination => $1,
-	  :gateway     => $2,
-	  :interface   => expected_attr[:interface] ? $3 : nil
-	}
-      else
-        ret.stdout =~ /^(\S+)(?: via (\S+))? dev (\S+).+\n(?:default via (\S+))?/
         actual_attr = {
           :destination => $1,
-          :gateway     => $2 ? $2 : $4,
+          :gateway     => $2,
           :interface   => expected_attr[:interface] ? $3 : nil
         }
+      else
+        matches = ret.stdout.scan(/^(\S+)(?: via (\S+))? dev (\S+).+\n|^(\S+).*\n|\s+nexthop via (\S+)\s+dev (\S+).+/)
+        if matches.length > 1
+          # ECMP route
+          destination = nil
+          matches.each do |groups|
+            if groups[3]
+              destination = groups[3]
+              next
+            end
+            next if expected_attr[:gateway] && expected_attr[:gateway] != groups[4]
+            next if expected_attr[:interface] && expected_attr[:interface] != groups[5]
+
+            actual_attr = {
+              :destination => destination,
+              :gateway => groups[4],
+              :interface => groups[5]
+            }
+          end
+        elsif matches.length == 1
+          # Non-ECMP route
+          groups = matches[0]
+          actual_attr = {
+            :destination => groups[0],
+            :gateway     => groups[1] ? groups[1] : groups[3],
+            :interface   => expected_attr[:interface] ? groups[2] : nil
+          }
+        end
+
       end
 
       expected_attr.each do |key, val|
@@ -169,38 +233,6 @@ module Specinfra
           $3
         end
       end
-    end
-
-    def self.get_inventory_memory
-      cmd = Specinfra.command.get(:get_inventory_memory)
-      ret = Specinfra.backend.run_command(cmd).stdout
-      memory = {}
-      ret.each_line do |line|
-        case line
-        when /^MemTotal:\s+(\d+) (.+)$/
-          memory['total'] = "#{$1}#{$2}"
-        end
-      end
-      memory
-    end
-
-    def self.get_inventory_ec2
-      Specinfra::Ec2Metadata.new.get
-    end
-
-    def self.get_inventory_hostname
-      cmd = Specinfra.command.get(:get_inventory_hostname)
-      Specinfra.backend.run_command(cmd).stdout.strip
-    end
-
-    def self.get_inventory_domain
-      cmd = Specinfra.command.get(:get_inventory_domain)
-      Specinfra.backend.run_command(cmd).stdout.strip
-    end
-
-    def self.get_inventory_fqdn
-      cmd = Specinfra.command.get(:get_inventory_fqdn)
-      Specinfra.backend.run_command(cmd).stdout.strip
     end
   end
 end

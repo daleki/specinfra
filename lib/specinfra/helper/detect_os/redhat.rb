@@ -1,5 +1,5 @@
 class Specinfra::Helper::DetectOs::Redhat < Specinfra::Helper::DetectOs
-  def self.detect
+  def detect
     # Fedora also has an /etc/redhat-release so the Fedora check must
     # come before the RedHat check
     if run_command('ls /etc/fedora-release').success?
@@ -16,7 +16,13 @@ class Specinfra::Helper::DetectOs::Redhat < Specinfra::Helper::DetectOs
 
       { :family => 'redhat', :release => release }
     elsif run_command('ls /etc/system-release').success?
-      { :family => 'redhat', :release => nil  } # Amazon Linux
+      line = run_command('cat /etc/system-release').stdout
+      if line =~ /release (\d[\d.]*)/
+        release = $1
+      elsif line =~ /Amazon Linux (\d+)/
+        release = $1
+      end
+      { :family => 'amazon', :release => release }
     end
   end
 end

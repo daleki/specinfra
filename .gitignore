@@ -15,3 +15,9 @@ spec/reports
 test/tmp
 test/version_tmp
 tmp
+.idea/
+.ruby-gemset
+.ruby-version
+.rvmrc
+upstream.sh
+
